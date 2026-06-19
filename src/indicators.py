@@ -12,7 +12,10 @@ class TechnicalIndicators:
     def add_all(df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         try:
-            # Trend
+            # ===== Trend =====
+            df["EMA_9"] = ta.trend.ema_indicator(
+                df["Close"], window=9
+            )
             df["EMA_20"] = ta.trend.ema_indicator(
                 df["Close"], window=20
             )
@@ -21,6 +24,9 @@ class TechnicalIndicators:
             )
             df["EMA_200"] = ta.trend.ema_indicator(
                 df["Close"], window=200
+            )
+            df["SMA_20"] = ta.trend.sma_indicator(
+                df["Close"], window=20
             )
 
             macd = ta.trend.MACD(df["Close"])
@@ -35,8 +41,9 @@ class TechnicalIndicators:
             df["ADX_Pos"] = adx.adx_pos()
             df["ADX_Neg"] = adx.adx_neg()
 
-            # Momentum
+            # ===== Momentum =====
             df["RSI"] = ta.momentum.rsi(df["Close"], window=14)
+            df["RSI_6"] = ta.momentum.rsi(df["Close"], window=6)
 
             stoch = ta.momentum.StochasticOscillator(
                 df["High"], df["Low"], df["Close"]
@@ -48,13 +55,15 @@ class TechnicalIndicators:
                 df["High"], df["Low"], df["Close"]
             )
             df["ROC"] = ta.momentum.roc(df["Close"], window=12)
+            df["ROC_5"] = ta.momentum.roc(df["Close"], window=5)
+
             df["MFI"] = ta.volume.money_flow_index(
                 df["High"], df["Low"],
                 df["Close"], df["Volume"],
                 window=14
             )
 
-            # Volatility
+            # ===== Volatility =====
             bb = ta.volatility.BollingerBands(df["Close"])
             df["BB_Upper"] = bb.bollinger_hband()
             df["BB_Lower"] = bb.bollinger_lband()
@@ -64,29 +73,123 @@ class TechnicalIndicators:
             df["ATR"] = ta.volatility.average_true_range(
                 df["High"], df["Low"], df["Close"], window=14
             )
+            df["ATR_Ratio"] = df["ATR"] / df["Close"]
 
-            # Custom
-            df["EMA_Cross"] = np.where(
+            kc = ta.volatility.KeltnerChannel(
+                df["High"], df["Low"], df["Close"]
+            )
+            df["KC_Upper"] = kc.keltner_channel_hband()
+            df["KC_Lower"] = kc.keltner_channel_lband()
+
+            # ===== Volume =====
+            df["OBV"] = ta.volume.on_balance_volume(
+                df["Close"], df["Volume"]
+            )
+            df["OBV_EMA"] = ta.trend.ema_indicator(
+                df["OBV"], window=20
+            )
+            df["OBV_Trend"] = np.where(
+                df["OBV"] > df["OBV_EMA"], 1, -1
+            )
+
+            # ===== Price Action =====
+            df["EMA_Cross_9_20"] = np.where(
+                df["EMA_9"] > df["EMA_20"], 1, -1
+            )
+            df["EMA_Cross_20_50"] = np.where(
                 df["EMA_20"] > df["EMA_50"], 1, -1
             )
             df["Price_Above_EMA200"] = np.where(
                 df["Close"] > df["EMA_200"], 1, 0
             )
-            df["Return_1"] = df["Close"].pct_change(1)
-            df["Return_5"] = df["Close"].pct_change(5)
-            df["Volatility"] = (
+            df["Price_Above_SMA20"] = np.where(
+                df["Close"] > df["SMA_20"], 1, 0
+            )
+
+            # ===== Returns =====
+            for p in [1, 2, 3, 5, 10]:
+                df[f"Return_{p}"] = df["Close"].pct_change(p)
+
+            df["Volatility_10"] = (
+                df["Close"].pct_change().rolling(10).std()
+            )
+            df["Volatility_20"] = (
                 df["Close"].pct_change().rolling(20).std()
             )
+
+            # ===== Candle Patterns =====
             df["Candle_Dir"] = np.where(
                 df["Close"] >= df["Open"], 1, -1
             )
+            df["Candle_Body"] = abs(df["Close"] - df["Open"])
+            df["Candle_Range"] = df["High"] - df["Low"]
+            df["Candle_Body_Ratio"] = (
+                df["Candle_Body"] /
+                (df["Candle_Range"] + 1e-10)
+            )
+            df["Upper_Wick"] = (
+                df["High"] - df[["Open", "Close"]].max(axis=1)
+            )
+            df["Lower_Wick"] = (
+                df[["Open", "Close"]].min(axis=1) - df["Low"]
+            )
 
-            # Time
+            # Doji
+            df["Is_Doji"] = np.where(
+                df["Candle_Body_Ratio"] < 0.1, 1, 0
+            )
+            # Hammer
+            df["Is_Hammer"] = np.where(
+                (df["Lower_Wick"] > 2 * df["Candle_Body"]) &
+                (df["Upper_Wick"] < df["Candle_Body"]),
+                1, 0
+            )
+            # Shooting Star
+            df["Is_Shooting_Star"] = np.where(
+                (df["Upper_Wick"] > 2 * df["Candle_Body"]) &
+                (df["Lower_Wick"] < df["Candle_Body"]),
+                1, 0
+            )
+
+            # ===== Support & Resistance =====
+            df["Pivot"] = (
+                df["High"].shift(1) +
+                df["Low"].shift(1) +
+                df["Close"].shift(1)
+            ) / 3
+            df["R1"] = 2 * df["Pivot"] - df["Low"].shift(1)
+            df["S1"] = 2 * df["Pivot"] - df["High"].shift(1)
+            df["Dist_R1"] = (df["R1"] - df["Close"]) / df["Close"]
+            df["Dist_S1"] = (df["Close"] - df["S1"]) / df["Close"]
+
+            # ===== Time Features =====
             df["Hour"] = df.index.hour
+            df["DayOfWeek"] = df.index.dayofweek
             df["Hour_Sin"] = np.sin(2 * np.pi * df["Hour"] / 24)
             df["Hour_Cos"] = np.cos(2 * np.pi * df["Hour"] / 24)
+            df["Day_Sin"] = np.sin(
+                2 * np.pi * df["DayOfWeek"] / 7
+            )
+            df["Day_Cos"] = np.cos(
+                2 * np.pi * df["DayOfWeek"] / 7
+            )
+
+            # جلسات التداول
+            df["Session_Tokyo"] = np.where(
+                df["Hour"].between(0, 8), 1, 0
+            )
+            df["Session_London"] = np.where(
+                df["Hour"].between(8, 16), 1, 0
+            )
+            df["Session_NewYork"] = np.where(
+                df["Hour"].between(13, 21), 1, 0
+            )
 
             df.dropna(inplace=True)
+            logger.info(
+                f"✅ المؤشرات: {len(df.columns)} عمود | "
+                f"{len(df)} شمعة"
+            )
             return df
 
         except Exception as e:
@@ -95,13 +198,53 @@ class TechnicalIndicators:
 
     @staticmethod
     def get_features() -> list:
+        """كل الخصائص للـ AI"""
         return [
-            "RSI", "MACD", "MACD_Signal", "MACD_Hist",
+            # Trend
+            "EMA_Cross_9_20", "EMA_Cross_20_50",
+            "Price_Above_EMA200", "Price_Above_SMA20",
             "ADX", "ADX_Pos", "ADX_Neg",
-            "BB_Pct", "BB_Width", "ATR",
+
+            # Momentum
+            "RSI", "RSI_6",
+            "MACD", "MACD_Signal", "MACD_Hist",
             "Stoch_K", "Stoch_D",
-            "Williams_R", "ROC", "MFI",
-            "EMA_Cross", "Price_Above_EMA200",
-            "Return_1", "Return_5", "Volatility",
-            "Candle_Dir", "Hour_Sin", "Hour_Cos",
+            "Williams_R", "ROC", "ROC_5", "MFI",
+
+            # Volatility
+            "BB_Pct", "BB_Width", "ATR_Ratio",
+
+            # Volume
+            "OBV_Trend",
+
+            # Returns
+            "Return_1", "Return_2", "Return_3",
+            "Return_5", "Return_10",
+            "Volatility_10", "Volatility_20",
+
+            # Candle
+            "Candle_Dir", "Candle_Body_Ratio",
+            "Is_Doji", "Is_Hammer", "Is_Shooting_Star",
+
+            # S&R
+            "Dist_R1", "Dist_S1",
+
+            # Time
+            "Hour_Sin", "Hour_Cos",
+            "Day_Sin", "Day_Cos",
+            "Session_Tokyo", "Session_London",
+            "Session_NewYork",
+        ]
+
+    @staticmethod
+    def get_sequence_features() -> list:
+        """خصائص LSTM (أهم الخصائص فقط)"""
+        return [
+            "RSI", "MACD_Hist", "ADX",
+            "BB_Pct", "ATR_Ratio",
+            "EMA_Cross_20_50", "Price_Above_EMA200",
+            "Return_1", "Return_5",
+            "Candle_Dir", "Candle_Body_Ratio",
+            "OBV_Trend", "Stoch_K",
+            "Hour_Sin", "Hour_Cos",
         ]
