@@ -87,8 +87,11 @@ class SignalEngine:
         else:
             final_signal = "HOLD"
 
-        atr = float(last.get("ATR", close * 0.001))
-        levels = self._calculate_levels(final_signal, close, atr)
+        # حساب المستويات بالـ Pips
+        pip = sym_config.get("pip", 0.0001)
+        levels = self._calculate_levels(
+            final_signal, close, pip
+        )
 
         return {
             "symbol": symbol,
@@ -96,32 +99,63 @@ class SignalEngine:
             "time": datetime.now().strftime("%Y-%m-%d %H:%M"),
             "signal": final_signal,
             "price": round(close, 5),
+            "score_buy": score_buy,
+            "score_sell": score_sell,
             **levels
         }
 
-    def _calculate_levels(self, signal, price, atr):
-        sl = atr * config.ATR_SL_MULTIPLIER
-        tp1 = atr * config.ATR_TP_MULTIPLIER
-        tp2 = atr * config.ATR_TP_MULTIPLIER * 2
+    def _calculate_levels(self, signal, price, pip):
+        """
+        حساب المستويات بالـ Pips الثابتة:
+        وقف الخسارة  = 50 pip
+        الهدف الأول  = 100 pip
+        الهدف الثاني = 200 pip
+        الهدف الثالث = 300 pip
+        """
+
+        sl_pips   = config.SL_PIPS    # 50
+        tp1_pips  = config.TP1_PIPS   # 100
+        tp2_pips  = config.TP2_PIPS   # 200
+        tp3_pips  = config.TP3_PIPS   # 300
+
+        sl_distance  = sl_pips  * pip
+        tp1_distance = tp1_pips * pip
+        tp2_distance = tp2_pips * pip
+        tp3_distance = tp3_pips * pip
 
         if signal == "BUY":
             return {
-                "entry": round(price, 5),
-                "sl": round(price - sl, 5),
-                "tp1": round(price + tp1, 5),
-                "tp2": round(price + tp2, 5),
+                "entry" : round(price, 5),
+                "sl"    : round(price - sl_distance,  5),
+                "tp1"   : round(price + tp1_distance, 5),
+                "tp2"   : round(price + tp2_distance, 5),
+                "tp3"   : round(price + tp3_distance, 5),
+                "sl_pips" : sl_pips,
+                "tp1_pips": tp1_pips,
+                "tp2_pips": tp2_pips,
+                "tp3_pips": tp3_pips,
             }
         elif signal == "SELL":
             return {
-                "entry": round(price, 5),
-                "sl": round(price + sl, 5),
-                "tp1": round(price - tp1, 5),
-                "tp2": round(price - tp2, 5),
+                "entry" : round(price, 5),
+                "sl"    : round(price + sl_distance,  5),
+                "tp1"   : round(price - tp1_distance, 5),
+                "tp2"   : round(price - tp2_distance, 5),
+                "tp3"   : round(price - tp3_distance, 5),
+                "sl_pips" : sl_pips,
+                "tp1_pips": tp1_pips,
+                "tp2_pips": tp2_pips,
+                "tp3_pips": tp3_pips,
             }
         else:
             return {
-                "entry": None,
-                "sl": None,
-                "tp1": None,
-                "tp2": None,
+                "entry"   : None,
+                "sl"      : None,
+                "tp1"     : None,
+                "tp2"     : None,
+                "tp3"     : None,
+                "sl_pips" : None,
+                "tp1_pips": None,
+                "tp2_pips": None,
+                "tp3_pips": None,
             }
