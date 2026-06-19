@@ -11,39 +11,42 @@ class Config:
     TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
     SEND_SIGNALS = os.getenv("SEND_SIGNALS", "true").lower() == "true"
 
+    # Twelve Data
+    TWELVE_DATA_KEY = os.getenv("TWELVE_DATA_KEY", "")
+
     # أزواج التداول
     SYMBOLS = {
-        "EURUSD=X": {
+        "EUR/USD": {
             "name": "EUR/USD",
             "display": "🇪🇺 EUR/USD",
             "pip": 0.0001,
             "type": "forex"
         },
-        "GBPUSD=X": {
+        "GBP/USD": {
             "name": "GBP/USD",
             "display": "🇬🇧 GBP/USD",
             "pip": 0.0001,
             "type": "forex"
         },
-        "USDJPY=X": {
+        "USD/JPY": {
             "name": "USD/JPY",
             "display": "🇯🇵 USD/JPY",
             "pip": 0.01,
             "type": "forex"
         },
-        "USDCHF=X": {
+        "USD/CHF": {
             "name": "USD/CHF",
             "display": "🇨🇭 USD/CHF",
             "pip": 0.0001,
             "type": "forex"
         },
-        "AUDUSD=X": {
+        "AUD/USD": {
             "name": "AUD/USD",
             "display": "🇦🇺 AUD/USD",
             "pip": 0.0001,
             "type": "forex"
         },
-        "XAUUSD=X": {
+        "XAU/USD": {
             "name": "GOLD",
             "display": "🥇 GOLD/USD",
             "pip": 0.01,
