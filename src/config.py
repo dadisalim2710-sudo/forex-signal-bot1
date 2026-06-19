@@ -43,7 +43,7 @@ class Config:
             "pip": 0.0001,
             "type": "forex"
         },
-        "GC=F": {
+        "XAUUSD=X": {
             "name": "GOLD",
             "display": "🥇 GOLD/USD",
             "pip": 0.01,
