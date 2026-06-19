@@ -18,8 +18,14 @@ from src.indicators import TechnicalIndicators
 
 logger = logging.getLogger(__name__)
 
+# ==========================================
 # تحميل TensorFlow بشكل آمن
+# ==========================================
+DISABLE_LSTM = os.getenv("DISABLE_LSTM", "false").lower() == "true"
+
 try:
+    if DISABLE_LSTM:
+        raise ImportError("LSTM معطل يدوياً")
     import tensorflow as tf
     from tensorflow.keras.models import Sequential, load_model
     from tensorflow.keras.layers import (
@@ -32,7 +38,7 @@ try:
     logger.info("✅ TensorFlow متاح - LSTM مفعّل")
 except ImportError:
     LSTM_AVAILABLE = False
-    logger.warning("⚠️ TensorFlow غير متاح - سيعمل بدون LSTM")
+    logger.warning("⚠️ LSTM معطل - يعمل بـ RF+GB فقط")
 
 
 class AIModel:
@@ -45,6 +51,7 @@ class AIModel:
             .replace("/", "_")
             .replace(" ", "_")
         )
+
         # النماذج
         self.rf_model = None
         self.gb_model = None
@@ -73,11 +80,13 @@ class AIModel:
         os.makedirs(config.MODELS_DIR, exist_ok=True)
 
     # ==========================================
-    # تحضير البيانات للـ ML
+    # تحضير بيانات ML
     # ==========================================
     def _prepare_ml_data(self, df, for_prediction=False):
         """بيانات Random Forest و Gradient Boosting"""
-        available = [f for f in self.features_ml if f in df.columns]
+        available = [
+            f for f in self.features_ml if f in df.columns
+        ]
         X = df[available].values
 
         if not for_prediction:
@@ -94,7 +103,7 @@ class AIModel:
             return self.scaler_ml.transform(X_last)
 
     # ==========================================
-    # تحضير البيانات للـ LSTM
+    # تحضير بيانات LSTM
     # ==========================================
     def _prepare_lstm_data(self, df, for_prediction=False):
         """بيانات LSTM - تسلسل زمني"""
@@ -107,26 +116,27 @@ class AIModel:
             future = df["Close"].shift(-5)
             y = (future > df["Close"]).astype(int).values
 
-            # تطبيع
             X_scaled = self.scaler_lstm.fit_transform(X)
 
-            # بناء التسلسلات
             sequences = []
             targets = []
 
             for i in range(self.lookback, len(X_scaled) - 5):
-                sequences.append(X_scaled[i - self.lookback:i])
+                sequences.append(
+                    X_scaled[i - self.lookback:i]
+                )
                 targets.append(y[i])
 
             return np.array(sequences), np.array(targets)
 
         else:
             X_scaled = self.scaler_lstm.transform(X)
-            # آخر تسلسل
+
             if len(X_scaled) < self.lookback:
-                pad = np.zeros(
-                    (self.lookback - len(X_scaled), X_scaled.shape[1])
-                )
+                pad = np.zeros((
+                    self.lookback - len(X_scaled),
+                    X_scaled.shape[1]
+                ))
                 X_scaled = np.vstack([pad, X_scaled])
 
             return X_scaled[-self.lookback:].reshape(
@@ -147,7 +157,11 @@ class AIModel:
             ),
             BatchNormalization(),
 
-            LSTM(32, return_sequences=False, dropout=0.2),
+            LSTM(
+                32,
+                return_sequences=False,
+                dropout=0.2
+            ),
             BatchNormalization(),
 
             Dense(32, activation="relu"),
@@ -179,7 +193,7 @@ class AIModel:
             )
             return False
 
-        # ===== 1. تدريب ML =====
+        # ===== 1. تدريب RF + GB =====
         logger.info(f"   📊 تدريب RF + GB...")
         X_ml, y_ml = self._prepare_ml_data(df)
 
@@ -236,7 +250,9 @@ class AIModel:
                 X_lstm, y_lstm = self._prepare_lstm_data(df)
 
                 if len(X_lstm) < 200:
-                    logger.warning("⚠️ بيانات LSTM قليلة - تخطي")
+                    logger.warning(
+                        "⚠️ بيانات LSTM قليلة - تخطي"
+                    )
                     self.lstm_enabled = False
                 else:
                     split_l = int(len(X_lstm) * 0.8)
@@ -271,14 +287,20 @@ class AIModel:
                         ) > 0.5
                     ).astype(int).flatten()
 
-                    lstm_acc = accuracy_score(yl_test, lstm_pred)
-                    logger.info(f"   ✅ دقة LSTM: {lstm_acc:.2%}")
+                    lstm_acc = accuracy_score(
+                        yl_test, lstm_pred
+                    )
+                    logger.info(
+                        f"   ✅ دقة LSTM: {lstm_acc:.2%}"
+                    )
 
             except Exception as e:
                 logger.error(f"   ❌ خطأ LSTM: {e}")
                 self.lstm_enabled = False
         else:
-            logger.info("   ⚠️ LSTM غير متاح - يعمل بـ RF+GB فقط")
+            logger.info(
+                "   ⚠️ LSTM معطل - يعمل بـ RF+GB فقط"
+            )
 
         self.is_trained = True
         self.save()
@@ -289,7 +311,7 @@ class AIModel:
     # التنبؤ
     # ==========================================
     def predict(self, df) -> tuple:
-        """تنبؤ من 3 نماذج مع تصويت"""
+        """تنبؤ من النماذج مع تصويت موزون"""
 
         if not self.is_trained:
             return "HOLD", 0.0
@@ -299,7 +321,9 @@ class AIModel:
             weights = []
 
             # ===== RF و GB =====
-            X_ml = self._prepare_ml_data(df, for_prediction=True)
+            X_ml = self._prepare_ml_data(
+                df, for_prediction=True
+            )
 
             rf_p = self.rf_model.predict_proba(X_ml)[0][1]
             gb_p = self.gb_model.predict_proba(X_ml)[0][1]
@@ -308,23 +332,29 @@ class AIModel:
             weights.extend([0.3, 0.3])
 
             # ===== LSTM =====
-            if self.lstm_enabled and self.lstm_model is not None:
+            if (
+                self.lstm_enabled and
+                self.lstm_model is not None
+            ):
                 try:
                     X_lstm = self._prepare_lstm_data(
                         df, for_prediction=True
                     )
-                    lstm_p = self.lstm_model.predict(
-                        X_lstm, verbose=0
-                    )[0][0]
+                    lstm_p = float(
+                        self.lstm_model.predict(
+                            X_lstm, verbose=0
+                        )[0][0]
+                    )
                     probabilities.append(lstm_p)
-                    weights.append(0.4)  # LSTM وزن أعلى
+                    weights.append(0.4)
                 except Exception as e:
                     logger.debug(f"LSTM predict error: {e}")
 
             # ===== التصويت الموزون =====
             total_weight = sum(weights)
             weighted_prob = sum(
-                p * w for p, w in zip(probabilities, weights)
+                p * w
+                for p, w in zip(probabilities, weights)
             ) / total_weight
 
             # ===== القرار =====
@@ -338,11 +368,16 @@ class AIModel:
                 confidence = round(1 - weighted_prob, 4)
             else:
                 signal = "HOLD"
-                confidence = round(abs(weighted_prob - 0.5) * 2, 4)
+                confidence = round(
+                    abs(weighted_prob - 0.5) * 2, 4
+                )
 
-            # معلومات إضافية للـ log
+            # معلومات للـ log
             models_used = "RF+GB"
-            if self.lstm_enabled and len(probabilities) == 3:
+            if (
+                self.lstm_enabled and
+                len(probabilities) == 3
+            ):
                 models_used = "RF+GB+LSTM"
 
             logger.info(
@@ -355,11 +390,13 @@ class AIModel:
             return signal, confidence
 
         except Exception as e:
-            logger.error(f"❌ خطأ التنبؤ {self.symbol}: {e}")
+            logger.error(
+                f"❌ خطأ التنبؤ {self.symbol}: {e}"
+            )
             return "HOLD", 0.0
 
     # ==========================================
-    # حفظ وتحميل
+    # حفظ النماذج
     # ==========================================
     def save(self):
         """حفظ كل النماذج"""
@@ -367,17 +404,26 @@ class AIModel:
             joblib.dump(self.rf_model, self.rf_path)
             joblib.dump(self.gb_model, self.gb_path)
             joblib.dump(self.scaler_ml, self.scaler_ml_path)
-            joblib.dump(self.scaler_lstm, self.scaler_lstm_path)
+            joblib.dump(
+                self.scaler_lstm, self.scaler_lstm_path
+            )
 
-            if self.lstm_enabled and self.lstm_model is not None:
+            if (
+                self.lstm_enabled and
+                self.lstm_model is not None
+            ):
                 self.lstm_model.save(self.lstm_path)
 
-            logger.info(f"💾 حفظ {self.symbol}")
-        except Exception as e:
-            logger.error(f"❌ فشل الحفظ: {e}")
+            logger.info(f"💾 حفظ نماذج {self.symbol}")
 
+        except Exception as e:
+            logger.error(f"❌ فشل الحفظ {self.symbol}: {e}")
+
+    # ==========================================
+    # تحميل النماذج
+    # ==========================================
     def load(self) -> bool:
-        """تحميل النماذج"""
+        """تحميل النماذج المحفوظة"""
         try:
             if not (
                 os.path.exists(self.rf_path) and
@@ -388,22 +434,32 @@ class AIModel:
             self.rf_model = joblib.load(self.rf_path)
             self.gb_model = joblib.load(self.gb_path)
             self.scaler_ml = joblib.load(self.scaler_ml_path)
-            self.scaler_lstm = joblib.load(self.scaler_lstm_path)
+            self.scaler_lstm = joblib.load(
+                self.scaler_lstm_path
+            )
 
-            # تحميل LSTM إن وجد
+            # تحميل LSTM إن وجد ومفعّل
             if (
                 LSTM_AVAILABLE and
+                not DISABLE_LSTM and
                 os.path.exists(self.lstm_path)
             ):
                 self.lstm_model = load_model(self.lstm_path)
                 self.lstm_enabled = True
-                logger.info(f"📂 تحميل {self.symbol} (RF+GB+LSTM)")
+                logger.info(
+                    f"📂 تحميل {self.symbol} (RF+GB+LSTM)"
+                )
             else:
-                logger.info(f"📂 تحميل {self.symbol} (RF+GB)")
+                self.lstm_enabled = False
+                logger.info(
+                    f"📂 تحميل {self.symbol} (RF+GB)"
+                )
 
             self.is_trained = True
             return True
 
         except Exception as e:
-            logger.error(f"❌ فشل تحميل {self.symbol}: {e}")
+            logger.error(
+                f"❌ فشل تحميل {self.symbol}: {e}"
+            )
             return False
