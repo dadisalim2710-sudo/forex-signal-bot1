@@ -1,4 +1,4 @@
-import yfinance as yf
+import requests
 import pandas as pd
 import logging
 import time
@@ -7,124 +7,140 @@ from src.config import config
 
 logger = logging.getLogger(__name__)
 
-# رموز بديلة للذهب نجرب واحداً واحداً
-GOLD_SYMBOLS = ["XAUUSD=X", "GC=F", "GLD"]
+BASE_URL = "https://api.twelvedata.com"
 
 
 class DataCollector:
 
     def __init__(self):
+        self.api_key = config.TWELVE_DATA_KEY
         self.cache = {}
         self.cache_time = {}
         self.cache_duration = 300
-        # خريطة الرموز البديلة
-        self.symbol_map = {}
 
-    def _try_symbol(self, symbol: str, days: int):
-        """محاولة جلب بيانات رمز معين"""
+    def _fetch(self, symbol: str, days: int) -> pd.DataFrame | None:
+        """جلب البيانات من Twelve Data"""
         try:
-            ticker = yf.Ticker(symbol)
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
+            # حساب عدد الشموع
+            # 1h = 24 شمعة في اليوم
+            candles = days * 24
+            # الحد الأقصى 5000
+            candles = min(candles, 5000)
 
-            df = ticker.history(
-                start=start_date.strftime("%Y-%m-%d"),
-                end=end_date.strftime("%Y-%m-%d"),
-                interval=config.TIMEFRAME,
-                auto_adjust=True
-            )
+            params = {
+                "symbol": symbol,
+                "interval": config.TIMEFRAME,
+                "outputsize": candles,
+                "apikey": self.api_key,
+                "format": "JSON",
+                "order": "ASC"
+            }
 
-            if df is None or len(df) < 50:
+            url = f"{BASE_URL}/time_series"
+            resp = requests.get(url, params=params, timeout=30)
+            data = resp.json()
+
+            # فحص الأخطاء
+            if data.get("status") == "error":
+                logger.error(
+                    f"❌ {symbol}: {data.get('message', 'خطأ')}"
+                )
                 return None
 
-            df = df[["Open", "High", "Low", "Close", "Volume"]]
-            df.dropna(inplace=True)
+            values = data.get("values")
+            if not values:
+                logger.error(f"❌ {symbol}: لا توجد بيانات")
+                return None
+
+            # تحويل إلى DataFrame
+            df = pd.DataFrame(values)
+            df["datetime"] = pd.to_datetime(df["datetime"])
+            df.set_index("datetime", inplace=True)
+            df.sort_index(inplace=True)
+
+            # تحويل الأعمدة
+            df = df[["open", "high", "low", "close", "volume"]].copy()
+            df.columns = ["Open", "High", "Low", "Close", "Volume"]
+            df = df.astype(float)
+
+            # إزالة المكرر
             df = df[~df.index.duplicated(keep="last")]
-
-            # إزالة timezone
-            if df.index.tz is not None:
-                df.index = df.index.tz_localize(None)
-
-            if len(df) < 50:
-                return None
+            df.dropna(inplace=True)
 
             return df
 
         except Exception as e:
-            logger.debug(f"فشل {symbol}: {e}")
+            logger.error(f"❌ خطأ في جلب {symbol}: {e}")
             return None
 
-    def get_historical_data(self, symbol: str, days: int = None):
-        """جلب البيانات مع retry ورموز بديلة"""
+    def get_historical_data(
+        self, symbol: str, days: int = None
+    ) -> pd.DataFrame | None:
+        """جلب البيانات مع الكاش"""
 
         days = days or config.TRAIN_DATA_DAYS
         cache_key = f"{symbol}_{days}"
 
         # فحص الكاش
         if cache_key in self.cache:
-            elapsed = (datetime.now() - self.cache_time[cache_key]).seconds
+            elapsed = (
+                datetime.now() - self.cache_time[cache_key]
+            ).seconds
             if elapsed < self.cache_duration:
+                logger.debug(f"[Cache] {symbol}")
                 return self.cache[cache_key]
 
-        # قائمة الرموز للمحاولة
-        symbols_to_try = [symbol]
+        logger.info(f"📥 جلب {symbol}...")
 
-        # إضافة رموز بديلة للذهب
-        if symbol in ["GC=F", "XAUUSD=X", "GOLD"]:
-            symbols_to_try = GOLD_SYMBOLS
+        df = self._fetch(symbol, days)
 
-        # إضافة الرمز المحفوظ سابقاً إن وجد
-        if symbol in self.symbol_map:
-            working = self.symbol_map[symbol]
-            if working not in symbols_to_try:
-                symbols_to_try.insert(0, working)
-
-        df = None
-        working_symbol = None
-
-        for sym in symbols_to_try:
-            logger.info(f"🔄 محاولة جلب {sym}...")
-
-            # محاولة 3 مرات لكل رمز
-            for attempt in range(3):
-                df = self._try_symbol(sym, days)
-                if df is not None:
-                    working_symbol = sym
-                    break
-                if attempt < 2:
-                    time.sleep(2)
-
-            if df is not None:
-                break
-
-        if df is None:
-            logger.error(f"❌ فشل جلب {symbol} بعد كل المحاولات")
+        if df is None or len(df) < 50:
+            logger.warning(f"⚠️ بيانات غير كافية: {symbol}")
             return None
-
-        # حفظ الرمز الناجح
-        if working_symbol and working_symbol != symbol:
-            self.symbol_map[symbol] = working_symbol
-            logger.info(f"✅ تم استخدام {working_symbol} بدلاً من {symbol}")
 
         # حفظ في الكاش
         self.cache[cache_key] = df
         self.cache_time[cache_key] = datetime.now()
 
-        logger.info(f"✅ {working_symbol or symbol}: {len(df)} شمعة")
+        logger.info(f"✅ {symbol}: {len(df)} شمعة")
         return df
 
-    def test_connection(self):
-        """اختبار الاتصال بعدة رموز"""
-        test_symbols = ["EURUSD=X", "XAUUSD=X", "GC=F"]
+    def test_connection(self) -> bool:
+        """اختبار الاتصال"""
 
-        for sym in test_symbols:
-            try:
-                df = self._try_symbol(sym, days=5)
-                if df is not None:
-                    logger.info(f"✅ اتصال ناجح عبر {sym}")
-                    return True
-            except Exception:
-                continue
+        if not self.api_key:
+            logger.error("❌ TWELVE_DATA_KEY غير موجود في المتغيرات")
+            return False
 
-        logger.error("❌ فشل جميع اختبارات الاتصال")
-        return False
+        try:
+            params = {
+                "symbol": "EUR/USD",
+                "interval": "1h",
+                "outputsize": 5,
+                "apikey": self.api_key,
+                "format": "JSON"
+            }
+
+            resp = requests.get(
+                f"{BASE_URL}/time_series",
+                params=params,
+                timeout=30
+            )
+            data = resp.json()
+
+            if data.get("status") == "error":
+                logger.error(
+                    f"❌ Twelve Data: {data.get('message')}"
+                )
+                return False
+
+            if "values" in data:
+                logger.info("✅ Twelve Data متصل بنجاح")
+                return True
+
+            logger.error(f"❌ رد غير متوقع: {data}")
+            return False
+
+        except Exception as e:
+            logger.error(f"❌ فشل الاتصال: {e}")
+            return False
