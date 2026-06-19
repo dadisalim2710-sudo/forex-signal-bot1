@@ -16,16 +16,12 @@ class DataCollector:
         self.api_key = config.TWELVE_DATA_KEY
         self.cache = {}
         self.cache_time = {}
-        self.cache_duration = 300
+        self.cache_duration = 600  # 10 دقائق كاش
 
     def _fetch(self, symbol: str, days: int) -> pd.DataFrame | None:
         """جلب البيانات من Twelve Data"""
         try:
-            # حساب عدد الشموع
-            # 1h = 24 شمعة في اليوم
-            candles = days * 24
-            # الحد الأقصى 5000
-            candles = min(candles, 5000)
+            candles = min(days * 24, 5000)
 
             params = {
                 "symbol": symbol,
@@ -58,12 +54,38 @@ class DataCollector:
             df.set_index("datetime", inplace=True)
             df.sort_index(inplace=True)
 
-            # تحويل الأعمدة
-            df = df[["open", "high", "low", "close", "volume"]].copy()
-            df.columns = ["Open", "High", "Low", "Close", "Volume"]
-            df = df.astype(float)
+            # ===== الحل: تحديد الأعمدة المتاحة =====
+            # Twelve Data لا يرسل volume للفوركس دائماً
+            available_cols = df.columns.tolist()
 
-            # إزالة المكرر
+            rename_map = {}
+            if "open" in available_cols:
+                rename_map["open"] = "Open"
+            if "high" in available_cols:
+                rename_map["high"] = "High"
+            if "low" in available_cols:
+                rename_map["low"] = "Low"
+            if "close" in available_cols:
+                rename_map["close"] = "Close"
+
+            df.rename(columns=rename_map, inplace=True)
+
+            # تأكد من وجود الأعمدة الأساسية
+            required = ["Open", "High", "Low", "Close"]
+            for col in required:
+                if col not in df.columns:
+                    logger.error(f"❌ {symbol}: عمود {col} مفقود")
+                    return None
+
+            # إضافة Volume = 0 إذا غير موجود
+            if "volume" in available_cols:
+                df.rename(columns={"volume": "Volume"}, inplace=True)
+            else:
+                df["Volume"] = 1000  # قيمة افتراضية
+
+            # الأعمدة النهائية
+            df = df[["Open", "High", "Low", "Close", "Volume"]]
+            df = df.astype(float)
             df = df[~df.index.duplicated(keep="last")]
             df.dropna(inplace=True)
 
@@ -76,7 +98,7 @@ class DataCollector:
     def get_historical_data(
         self, symbol: str, days: int = None
     ) -> pd.DataFrame | None:
-        """جلب البيانات مع الكاش"""
+        """جلب البيانات مع الكاش والتأخير"""
 
         days = days or config.TRAIN_DATA_DAYS
         cache_key = f"{symbol}_{days}"
@@ -91,6 +113,11 @@ class DataCollector:
                 return self.cache[cache_key]
 
         logger.info(f"📥 جلب {symbol}...")
+
+        # ===== تأخير بين الطلبات =====
+        # حد مجاني = 8 طلبات/دقيقة
+        # 60 ثانية / 8 = 7.5 ثانية بين كل طلب
+        time.sleep(8)
 
         df = self._fetch(symbol, days)
 
@@ -109,7 +136,7 @@ class DataCollector:
         """اختبار الاتصال"""
 
         if not self.api_key:
-            logger.error("❌ TWELVE_DATA_KEY غير موجود في المتغيرات")
+            logger.error("❌ TWELVE_DATA_KEY غير موجود")
             return False
 
         try:
