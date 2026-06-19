@@ -71,9 +71,11 @@ class SignalEngine:
             score_sell += 1
 
         # AI
-        if ai_signal == "BUY" and ai_confidence >= config.PREDICTION_THRESHOLD:
+        if (ai_signal == "BUY" and
+                ai_confidence >= config.PREDICTION_THRESHOLD):
             score_buy += 2
-        elif ai_signal == "SELL" and ai_confidence >= config.PREDICTION_THRESHOLD:
+        elif (ai_signal == "SELL" and
+              ai_confidence >= config.PREDICTION_THRESHOLD):
             score_sell += 2
 
         # القرار
