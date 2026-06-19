@@ -2,7 +2,10 @@ import os
 import numpy as np
 import joblib
 import logging
-from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.ensemble import (
+    RandomForestClassifier,
+    GradientBoostingClassifier
+)
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score
 from sklearn.utils.class_weight import compute_class_weight
@@ -16,7 +19,11 @@ class AIModel:
 
     def __init__(self, symbol: str):
         self.symbol = symbol
-        self.safe_name = symbol.replace("=", "_").replace("/", "_")
+        self.safe_name = (
+            symbol.replace("=", "_")
+            .replace("/", "_")
+            .replace(" ", "_")
+        )
         self.model = None
         self.scaler = StandardScaler()
         self.features = TechnicalIndicators.get_features()
@@ -52,12 +59,13 @@ class AIModel:
         logger.info(f"🧠 تدريب {self.symbol}...")
 
         if len(df) < 300:
-            logger.error("بيانات غير كافية")
+            logger.error(f"❌ بيانات غير كافية: {len(df)}")
             return False
 
         X, y = self._prepare_data(df)
 
         if len(X) < 200:
+            logger.error("❌ بيانات بعد التنظيف غير كافية")
             return False
 
         split = int(len(X) * 0.8)
@@ -134,8 +142,10 @@ class AIModel:
 
     def load(self) -> bool:
         try:
-            if (os.path.exists(self.model_path) and
-                    os.path.exists(self.scaler_path)):
+            if (
+                os.path.exists(self.model_path) and
+                os.path.exists(self.scaler_path)
+            ):
                 self.model = joblib.load(self.model_path)
                 self.scaler = joblib.load(self.scaler_path)
                 self.is_trained = True
