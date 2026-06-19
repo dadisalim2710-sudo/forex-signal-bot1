@@ -13,16 +13,24 @@ class TechnicalIndicators:
         df = df.copy()
         try:
             # Trend
-            df["EMA_20"] = ta.trend.ema_indicator(df["Close"], window=20)
-            df["EMA_50"] = ta.trend.ema_indicator(df["Close"], window=50)
-            df["EMA_200"] = ta.trend.ema_indicator(df["Close"], window=200)
+            df["EMA_20"] = ta.trend.ema_indicator(
+                df["Close"], window=20
+            )
+            df["EMA_50"] = ta.trend.ema_indicator(
+                df["Close"], window=50
+            )
+            df["EMA_200"] = ta.trend.ema_indicator(
+                df["Close"], window=200
+            )
 
             macd = ta.trend.MACD(df["Close"])
             df["MACD"] = macd.macd()
             df["MACD_Signal"] = macd.macd_signal()
             df["MACD_Hist"] = macd.macd_diff()
 
-            adx = ta.trend.ADXIndicator(df["High"], df["Low"], df["Close"])
+            adx = ta.trend.ADXIndicator(
+                df["High"], df["Low"], df["Close"]
+            )
             df["ADX"] = adx.adx()
             df["ADX_Pos"] = adx.adx_pos()
             df["ADX_Neg"] = adx.adx_neg()
@@ -41,7 +49,9 @@ class TechnicalIndicators:
             )
             df["ROC"] = ta.momentum.roc(df["Close"], window=12)
             df["MFI"] = ta.volume.money_flow_index(
-                df["High"], df["Low"], df["Close"], df["Volume"], window=14
+                df["High"], df["Low"],
+                df["Close"], df["Volume"],
+                window=14
             )
 
             # Volatility
@@ -56,14 +66,20 @@ class TechnicalIndicators:
             )
 
             # Custom
-            df["EMA_Cross"] = np.where(df["EMA_20"] > df["EMA_50"], 1, -1)
+            df["EMA_Cross"] = np.where(
+                df["EMA_20"] > df["EMA_50"], 1, -1
+            )
             df["Price_Above_EMA200"] = np.where(
                 df["Close"] > df["EMA_200"], 1, 0
             )
             df["Return_1"] = df["Close"].pct_change(1)
             df["Return_5"] = df["Close"].pct_change(5)
-            df["Volatility"] = df["Close"].pct_change().rolling(20).std()
-            df["Candle_Dir"] = np.where(df["Close"] >= df["Open"], 1, -1)
+            df["Volatility"] = (
+                df["Close"].pct_change().rolling(20).std()
+            )
+            df["Candle_Dir"] = np.where(
+                df["Close"] >= df["Open"], 1, -1
+            )
 
             # Time
             df["Hour"] = df.index.hour
