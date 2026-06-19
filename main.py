@@ -50,7 +50,13 @@ class SignalBot:
         logger.info("=" * 50)
 
         if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
-            logger.error("❌ أضف TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID في Railway")
+            logger.error(
+                "❌ أضف TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID"
+            )
+            return False
+
+        if not config.TWELVE_DATA_KEY:
+            logger.error("❌ أضف TWELVE_DATA_KEY في Railway")
             return False
 
         logger.info("🔗 اختبار تيليجرام...")
@@ -59,11 +65,11 @@ class SignalBot:
             return False
         logger.info("✅ تيليجرام متصل")
 
-        logger.info("🔗 اختبار البيانات...")
+        logger.info("🔗 اختبار Twelve Data...")
         if not self.data.test_connection():
-            logger.error("❌ فشل جلب البيانات")
+            logger.error("❌ فشل الاتصال بـ Twelve Data")
             return False
-        logger.info("✅ البيانات تعمل")
+        logger.info("✅ Twelve Data متصل")
 
         logger.info("🧠 تهيئة النماذج...")
         for symbol in config.SYMBOLS:
@@ -83,7 +89,9 @@ class SignalBot:
         return True
 
     def _should_retrain(self, symbol: str) -> bool:
-        elapsed = (time.time() - self.last_train.get(symbol, 0)) / 3600
+        elapsed = (
+            time.time() - self.last_train.get(symbol, 0)
+        ) / 3600
         return elapsed >= config.RETRAIN_HOURS
 
     def _retrain(self, symbol: str):
