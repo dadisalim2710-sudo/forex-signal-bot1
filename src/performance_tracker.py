@@ -33,7 +33,9 @@ class PerformanceTracker:
     def _save(self):
         try:
             with open(self.stats_file, "w", encoding="utf-8") as f:
-                json.dump(self.stats, f, ensure_ascii=False, indent=2)
+                json.dump(
+                    self.stats, f, ensure_ascii=False, indent=2
+                )
         except Exception as e:
             logger.error(f"فشل الحفظ: {e}")
 
