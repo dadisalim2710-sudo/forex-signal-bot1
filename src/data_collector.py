@@ -16,27 +16,31 @@ class DataCollector:
         self.api_key = config.TWELVE_DATA_KEY
         self.cache = {}
         self.cache_time = {}
-        self.cache_duration = 600  # 10 دقائق كاش
+        self.cache_duration = 600
 
-    def _fetch(self, symbol: str, days: int) -> pd.DataFrame | None:
+    def _fetch(self, symbol: str, days: int,
+               timeframe: str = None) -> pd.DataFrame | None:
         """جلب البيانات من Twelve Data"""
         try:
+            tf = timeframe or config.TIMEFRAME
             candles = min(days * 24, 5000)
 
             params = {
-                "symbol": symbol,
-                "interval": config.TIMEFRAME,
+                "symbol"    : symbol,
+                "interval"  : tf,
                 "outputsize": candles,
-                "apikey": self.api_key,
-                "format": "JSON",
-                "order": "ASC"
+                "apikey"    : self.api_key,
+                "format"    : "JSON",
+                "order"     : "ASC"
             }
 
-            url = f"{BASE_URL}/time_series"
-            resp = requests.get(url, params=params, timeout=30)
+            resp = requests.get(
+                f"{BASE_URL}/time_series",
+                params=params,
+                timeout=30
+            )
             data = resp.json()
 
-            # فحص الأخطاء
             if data.get("status") == "error":
                 logger.error(
                     f"❌ {symbol}: {data.get('message', 'خطأ')}"
@@ -48,42 +52,34 @@ class DataCollector:
                 logger.error(f"❌ {symbol}: لا توجد بيانات")
                 return None
 
-            # تحويل إلى DataFrame
             df = pd.DataFrame(values)
             df["datetime"] = pd.to_datetime(df["datetime"])
             df.set_index("datetime", inplace=True)
             df.sort_index(inplace=True)
 
-            # ===== الحل: تحديد الأعمدة المتاحة =====
-            # Twelve Data لا يرسل volume للفوركس دائماً
-            available_cols = df.columns.tolist()
-
+            # تحديد الأعمدة المتاحة
             rename_map = {}
-            if "open" in available_cols:
-                rename_map["open"] = "Open"
-            if "high" in available_cols:
-                rename_map["high"] = "High"
-            if "low" in available_cols:
-                rename_map["low"] = "Low"
-            if "close" in available_cols:
-                rename_map["close"] = "Close"
+            for col in ["open", "high", "low", "close"]:
+                if col in df.columns:
+                    rename_map[col] = col.capitalize()
 
             df.rename(columns=rename_map, inplace=True)
 
-            # تأكد من وجود الأعمدة الأساسية
             required = ["Open", "High", "Low", "Close"]
             for col in required:
                 if col not in df.columns:
-                    logger.error(f"❌ {symbol}: عمود {col} مفقود")
+                    logger.error(
+                        f"❌ {symbol}: عمود {col} مفقود"
+                    )
                     return None
 
-            # إضافة Volume = 0 إذا غير موجود
-            if "volume" in available_cols:
-                df.rename(columns={"volume": "Volume"}, inplace=True)
+            if "volume" in df.columns:
+                df.rename(
+                    columns={"volume": "Volume"}, inplace=True
+                )
             else:
-                df["Volume"] = 1000  # قيمة افتراضية
+                df["Volume"] = 1000
 
-            # الأعمدة النهائية
             df = df[["Open", "High", "Low", "Close", "Volume"]]
             df = df.astype(float)
             df = df[~df.index.duplicated(keep="last")]
@@ -96,41 +92,68 @@ class DataCollector:
             return None
 
     def get_historical_data(
-        self, symbol: str, days: int = None
+        self,
+        symbol: str,
+        days: int = None,
+        timeframe: str = None
     ) -> pd.DataFrame | None:
-        """جلب البيانات مع الكاش والتأخير"""
+        """جلب البيانات مع الكاش"""
 
         days = days or config.TRAIN_DATA_DAYS
-        cache_key = f"{symbol}_{days}"
+        tf = timeframe or config.TIMEFRAME
+        cache_key = f"{symbol}_{days}_{tf}"
 
-        # فحص الكاش
         if cache_key in self.cache:
             elapsed = (
                 datetime.now() - self.cache_time[cache_key]
             ).seconds
             if elapsed < self.cache_duration:
-                logger.debug(f"[Cache] {symbol}")
                 return self.cache[cache_key]
 
-        logger.info(f"📥 جلب {symbol}...")
-
-        # ===== تأخير بين الطلبات =====
-        # حد مجاني = 8 طلبات/دقيقة
-        # 60 ثانية / 8 = 7.5 ثانية بين كل طلب
+        logger.info(f"📥 جلب {symbol} ({tf})...")
         time.sleep(8)
 
-        df = self._fetch(symbol, days)
+        df = self._fetch(symbol, days, tf)
 
         if df is None or len(df) < 50:
             logger.warning(f"⚠️ بيانات غير كافية: {symbol}")
             return None
 
-        # حفظ في الكاش
         self.cache[cache_key] = df
         self.cache_time[cache_key] = datetime.now()
 
-        logger.info(f"✅ {symbol}: {len(df)} شمعة")
+        logger.info(f"✅ {symbol} ({tf}): {len(df)} شمعة")
         return df
+
+    def get_multi_timeframe(
+        self, symbol: str
+    ) -> dict:
+        """جلب بيانات من 3 أطر زمنية"""
+
+        result = {}
+
+        # H1
+        df_h1 = self.get_historical_data(
+            symbol, days=90, timeframe=config.TIMEFRAME
+        )
+        if df_h1 is not None:
+            result["H1"] = df_h1
+
+        # H4
+        df_h4 = self.get_historical_data(
+            symbol, days=180, timeframe=config.TIMEFRAME_H4
+        )
+        if df_h4 is not None:
+            result["H4"] = df_h4
+
+        # D1
+        df_d1 = self.get_historical_data(
+            symbol, days=365, timeframe=config.TIMEFRAME_D1
+        )
+        if df_d1 is not None:
+            result["D1"] = df_d1
+
+        return result
 
     def test_connection(self) -> bool:
         """اختبار الاتصال"""
@@ -141,11 +164,11 @@ class DataCollector:
 
         try:
             params = {
-                "symbol": "EUR/USD",
-                "interval": "1h",
+                "symbol"    : "EUR/USD",
+                "interval"  : "1h",
                 "outputsize": 5,
-                "apikey": self.api_key,
-                "format": "JSON"
+                "apikey"    : self.api_key,
+                "format"    : "JSON"
             }
 
             resp = requests.get(
@@ -155,17 +178,13 @@ class DataCollector:
             )
             data = resp.json()
 
-            if data.get("status") == "error":
-                logger.error(
-                    f"❌ Twelve Data: {data.get('message')}"
-                )
-                return False
-
             if "values" in data:
                 logger.info("✅ Twelve Data متصل بنجاح")
                 return True
 
-            logger.error(f"❌ رد غير متوقع: {data}")
+            logger.error(
+                f"❌ Twelve Data: {data.get('message')}"
+            )
             return False
 
         except Exception as e:
