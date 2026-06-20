@@ -31,6 +31,7 @@ from src.ai_model import AIModel
 from src.signal_engine import SignalEngine
 from src.notifier import TelegramNotifier
 from src.performance_tracker import PerformanceTracker
+from src.market_hours import MarketHours
 
 
 class SignalBot:
@@ -40,10 +41,13 @@ class SignalBot:
         self.signal_engine = SignalEngine()
         self.notifier      = TelegramNotifier()
         self.tracker       = PerformanceTracker()
+        self.market        = MarketHours()
         self.models        = {}
         self.last_train    = {}
         self.scan_count    = 0
+        self.market_was_open = False
 
+    # ==========================================
     def setup(self) -> bool:
         logger.info("=" * 50)
         logger.info("  🤖 روبوت إشارات التداول الاحترافي")
@@ -69,6 +73,7 @@ class SignalBot:
             return False
         logger.info("✅ Twelve Data متصل")
 
+        # تدريب النماذج (يعمل دائماً بغض النظر عن السوق)
         logger.info("🧠 تهيئة النماذج...")
         for symbol in config.SYMBOLS:
             self.models[symbol] = AIModel(symbol)
@@ -82,10 +87,13 @@ class SignalBot:
                     self.models[symbol].train(df)
             self.last_train[symbol] = time.time()
 
-        self.notifier.send_startup_message()
+        # رسالة البداية
+        market_status = MarketHours.get_status_text()
+        self.notifier.send_startup_message(market_status)
         logger.info("✅ الروبوت جاهز!")
         return True
 
+    # ==========================================
     def _should_retrain(self, symbol: str) -> bool:
         elapsed = (
             time.time() - self.last_train.get(symbol, 0)
@@ -102,23 +110,55 @@ class SignalBot:
             self.models[symbol].train(df)
             self.last_train[symbol] = time.time()
 
+    # ==========================================
     def scan(self):
+        """دورة الفحص الرئيسية"""
+
         self.scan_count += 1
+        now = datetime.now().strftime("%H:%M:%S")
+
         logger.info(f"\n{'─'*40}")
-        logger.info(
-            f"🔍 فحص #{self.scan_count} | "
-            f"{datetime.now().strftime('%H:%M:%S')}"
-        )
+        logger.info(f"🔍 فحص #{self.scan_count} | {now}")
         logger.info(f"{'─'*40}")
+
+        # ===== فحص السوق أولاً =====
+        is_open = MarketHours.is_forex_open()
+        session = MarketHours.get_active_session()
+
+        if not is_open:
+            logger.info(f"🔴 السوق مغلق | {MarketHours.get_next_open()}")
+
+            # إشعار عند إغلاق السوق (مرة واحدة فقط)
+            if self.market_was_open:
+                self.market_was_open = False
+                self.notifier.send_market_closed()
+
+            return
+
+        # ===== السوق مفتوح =====
+        logger.info(f"🟢 السوق مفتوح | جلسة: {session}")
+
+        # إشعار عند فتح السوق (مرة واحدة فقط)
+        if not self.market_was_open:
+            self.market_was_open = True
+            self.notifier.send_market_open(session)
 
         all_signals = []
 
         for symbol in config.SYMBOLS:
             try:
+                # فحص إذا الزوج نشط في هذه الجلسة
+                if not MarketHours.is_symbol_active(symbol):
+                    logger.info(
+                        f"  ⏸ {symbol}: غير نشط في هذه الجلسة"
+                    )
+                    continue
+
+                # إعادة التدريب إذا لزم
                 if self._should_retrain(symbol):
                     self._retrain(symbol)
 
-                # جلب H1
+                # جلب البيانات
                 df = self.data.get_historical_data(
                     symbol, days=90
                 )
@@ -130,11 +170,11 @@ class SignalBot:
 
                 df = TechnicalIndicators.add_all(df)
 
-                # جلب Multi-Timeframe
+                # Multi-Timeframe
                 mtf_data = None
                 if config.REQUIRE_MTF:
-                    mtf_data = self.data.get_multi_timeframe(
-                        symbol
+                    mtf_data = (
+                        self.data.get_multi_timeframe(symbol)
                     )
 
                 # تنبؤ AI
@@ -142,10 +182,11 @@ class SignalBot:
                     self.models[symbol].predict(df)
                 )
 
-                # تحليل الإشارة
+                # تحليل
                 signal_data = self.signal_engine.analyze(
-                    symbol, df, ai_signal,
-                    ai_conf, mtf_data
+                    symbol, df,
+                    ai_signal, ai_conf,
+                    mtf_data
                 )
 
                 all_signals.append(signal_data)
@@ -160,24 +201,30 @@ class SignalBot:
                     f"{signal_data['regime']}"
                 )
 
+                # إرسال الإشارة
                 if signal_data["signal"] != "HOLD":
                     sent = self.notifier.send_signal(signal_data)
                     if sent:
                         logger.info(
                             f"  ✅ إشارة أُرسلت: {symbol}"
                         )
+                else:
+                    logger.info(f"  ⚪ {symbol}: HOLD")
 
             except Exception as e:
                 logger.error(f"❌ خطأ {symbol}: {e}")
 
-        if self.scan_count % 5 == 0:
+        # ملخص كل 5 فحوصات
+        if self.scan_count % 5 == 0 and all_signals:
             self.notifier.send_summary(all_signals)
             logger.info(f"\n{self.tracker.get_summary()}")
 
+    # ==========================================
     def run(self):
         if not self.setup():
             sys.exit(1)
 
+        # فحص أولي
         self.scan()
 
         interval = config.SCAN_INTERVAL_MINUTES
