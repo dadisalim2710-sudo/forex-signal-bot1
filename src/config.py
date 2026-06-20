@@ -73,7 +73,9 @@ class Config:
     # ==========================================
     # إعدادات البيانات
     # ==========================================
-    TIMEFRAME = "1h"
+    TIMEFRAME       = "1h"
+    TIMEFRAME_H4    = "4h"
+    TIMEFRAME_D1    = "1day"
     TRAIN_DATA_DAYS = int(os.getenv("TRAIN_DATA_DAYS", "365"))
     LOOKBACK_PERIOD = 60
 
@@ -83,12 +85,14 @@ class Config:
     PREDICTION_THRESHOLD = float(
         os.getenv("PREDICTION_THRESHOLD", "0.62")
     )
-    RETRAIN_HOURS = int(os.getenv("RETRAIN_HOURS", "24"))
+    RETRAIN_HOURS    = int(os.getenv("RETRAIN_HOURS", "24"))
+    MIN_SIGNAL_SCORE = int(os.getenv("MIN_SIGNAL_SCORE", "3"))
 
     # ==========================================
-    # إعدادات الإشارات
+    # فلتر جودة الإشارة
     # ==========================================
-    MIN_SIGNAL_SCORE = int(os.getenv("MIN_SIGNAL_SCORE", "3"))
+    MIN_CONFIDENCE    = float(os.getenv("MIN_CONFIDENCE", "0.60"))
+    REQUIRE_MTF      = os.getenv("REQUIRE_MTF", "true").lower() == "true"
 
     # ==========================================
     # إعدادات التشغيل
