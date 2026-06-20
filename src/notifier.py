@@ -35,13 +35,9 @@ class TelegramNotifier:
         if signal == "HOLD":
             return False
 
-        # منع التكرار خلال ساعة
         cache_key = f"{symbol}_{signal}"
         if cache_key in self.sent_signals:
             if time.time() - self.sent_signals[cache_key] < 3600:
-                logger.info(
-                    f"ℹ️ {symbol}: تم إرسال نفس الإشارة مؤخراً"
-                )
                 return False
 
         message = self._format_signal(signal_data)
@@ -49,7 +45,6 @@ class TelegramNotifier:
 
         if success:
             self.sent_signals[cache_key] = time.time()
-            logger.info(f"✅ تم إرسال إشارة {symbol} {signal}")
 
         return success
 
@@ -78,7 +73,7 @@ class TelegramNotifier:
         return message
 
     # ==========================================
-    def send_startup_message(self):
+    def send_startup_message(self, market_status: str = ""):
         """رسالة بدء التشغيل"""
 
         symbols_list = "\n".join(
@@ -90,25 +85,55 @@ class TelegramNotifier:
 
         message = (
             f"🤖 *الروبوت يعمل الآن*\n\n"
-            f"📊 *الأزواج:*\n"
-            f"{symbols_list}\n\n"
+            f"📊 *الأزواج:*\n{symbols_list}\n\n"
             f"📐 *إعدادات Pips:*\n"
             f"  • وقف الخسارة:  `{config.SL_PIPS} pips`\n"
             f"  • الهدف الأول:  `{config.TP1_PIPS} pips`\n"
             f"  • الهدف الثاني: `{config.TP2_PIPS} pips`\n"
             f"  • الهدف الثالث: `{config.TP3_PIPS} pips`\n\n"
-            f"⏰ الفحص كل `{config.SCAN_INTERVAL_MINUTES}` دقيقة"
+            f"⏰ الفحص كل `{config.SCAN_INTERVAL_MINUTES}` دقيقة\n\n"
+            f"{market_status}"
+        )
+        self._send_message(message)
+
+    # ==========================================
+    def send_market_open(self, session: str):
+        """إشعار فتح السوق"""
+        message = (
+            f"🟢 *السوق فتح الآن*\n\n"
+            f"📍 الجلسة: *{session}*\n"
+            f"🤖 البوت يبدأ البحث عن إشارات..."
+        )
+        self._send_message(message)
+
+    # ==========================================
+    def send_market_closed(self):
+        """إشعار إغلاق السوق"""
+        from src.market_hours import MarketHours
+        next_open = MarketHours.get_next_open()
+
+        message = (
+            f"🔴 *السوق أغلق*\n\n"
+            f"⏰ يفتح: *{next_open}*\n"
+            f"😴 البوت في وضع الانتظار..."
         )
         self._send_message(message)
 
     # ==========================================
     def send_summary(self, signals_summary: list):
-        """ملخص كل 5 فحوصات"""
+        """ملخص الفحص"""
 
         if not signals_summary:
             return
 
-        lines = ["📋 *ملخص الفحص:*\n"]
+        from src.market_hours import MarketHours
+        session = MarketHours.get_active_session()
+
+        lines = [
+            f"📋 *ملخص الفحص*\n"
+            f"🕐 {datetime.now().strftime('%H:%M')} | "
+            f"جلسة: {session}\n"
+        ]
 
         for s in signals_summary:
             if s["signal"] == "BUY":
@@ -126,18 +151,13 @@ class TelegramNotifier:
         self._send_message("\n".join(lines))
 
     # ==========================================
-    def send_error(self, message: str):
-        """إرسال رسالة خطأ"""
-        self._send_message(f"❌ *خطأ:* {message}")
-
-    # ==========================================
     def _send_message(self, text: str) -> bool:
-        """إرسال رسالة إلى تيليجرام"""
+        """إرسال رسالة"""
         try:
             url = f"{self.base_url}/sendMessage"
             payload = {
                 "chat_id": self.chat_id,
-                "text": text,
+                "text"   : text,
                 "parse_mode": "Markdown",
                 "disable_web_page_preview": True
             }
@@ -152,12 +172,15 @@ class TelegramNotifier:
 
     # ==========================================
     def test_connection(self) -> bool:
-        """اختبار الاتصال بتيليجرام"""
+        """اختبار الاتصال"""
         try:
             resp = requests.get(
-                f"{self.base_url}/getMe",
-                timeout=10
+                f"{self.base_url}/getMe", timeout=10
             )
             return resp.status_code == 200
         except Exception:
             return False
+
+
+# import مطلوب في send_summary
+from datetime import datetime
