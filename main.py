@@ -5,9 +5,9 @@ import logging
 import schedule
 from datetime import datetime
 
-os.makedirs("logs", exist_ok=True)
+os.makedirs("logs",   exist_ok=True)
 os.makedirs("models", exist_ok=True)
-os.makedirs("data", exist_ok=True)
+os.makedirs("data",   exist_ok=True)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,38 +36,36 @@ from src.performance_tracker import PerformanceTracker
 class SignalBot:
 
     def __init__(self):
-        self.data = DataCollector()
+        self.data          = DataCollector()
         self.signal_engine = SignalEngine()
-        self.notifier = TelegramNotifier()
-        self.tracker = PerformanceTracker()
-        self.models = {}
-        self.last_train = {}
-        self.scan_count = 0
+        self.notifier      = TelegramNotifier()
+        self.tracker       = PerformanceTracker()
+        self.models        = {}
+        self.last_train    = {}
+        self.scan_count    = 0
 
     def setup(self) -> bool:
         logger.info("=" * 50)
-        logger.info("  🤖 روبوت إشارات التداول")
+        logger.info("  🤖 روبوت إشارات التداول الاحترافي")
         logger.info("=" * 50)
 
-        if not config.TELEGRAM_BOT_TOKEN or not config.TELEGRAM_CHAT_ID:
-            logger.error(
-                "❌ أضف TELEGRAM_BOT_TOKEN و TELEGRAM_CHAT_ID"
-            )
+        if not config.TELEGRAM_BOT_TOKEN:
+            logger.error("❌ أضف TELEGRAM_BOT_TOKEN")
             return False
 
         if not config.TWELVE_DATA_KEY:
-            logger.error("❌ أضف TWELVE_DATA_KEY في Railway")
+            logger.error("❌ أضف TWELVE_DATA_KEY")
             return False
 
         logger.info("🔗 اختبار تيليجرام...")
         if not self.notifier.test_connection():
-            logger.error("❌ فشل الاتصال بتيليجرام")
+            logger.error("❌ فشل تيليجرام")
             return False
         logger.info("✅ تيليجرام متصل")
 
         logger.info("🔗 اختبار Twelve Data...")
         if not self.data.test_connection():
-            logger.error("❌ فشل الاتصال بـ Twelve Data")
+            logger.error("❌ فشل Twelve Data")
             return False
         logger.info("✅ Twelve Data متصل")
 
@@ -120,15 +118,34 @@ class SignalBot:
                 if self._should_retrain(symbol):
                     self._retrain(symbol)
 
-                df = self.data.get_historical_data(symbol, days=90)
+                # جلب H1
+                df = self.data.get_historical_data(
+                    symbol, days=90
+                )
                 if df is None or len(df) < 100:
+                    logger.warning(
+                        f"⚠️ {symbol}: بيانات غير كافية"
+                    )
                     continue
 
                 df = TechnicalIndicators.add_all(df)
-                ai_signal, ai_conf = self.models[symbol].predict(df)
 
+                # جلب Multi-Timeframe
+                mtf_data = None
+                if config.REQUIRE_MTF:
+                    mtf_data = self.data.get_multi_timeframe(
+                        symbol
+                    )
+
+                # تنبؤ AI
+                ai_signal, ai_conf = (
+                    self.models[symbol].predict(df)
+                )
+
+                # تحليل الإشارة
                 signal_data = self.signal_engine.analyze(
-                    symbol, df, ai_signal, ai_conf
+                    symbol, df, ai_signal,
+                    ai_conf, mtf_data
                 )
 
                 all_signals.append(signal_data)
@@ -137,11 +154,18 @@ class SignalBot:
                 logger.info(
                     f"  {signal_data['symbol_display']:15s} | "
                     f"{signal_data['signal']:4s} | "
-                    f"AI: {ai_signal}"
+                    f"AI: {ai_signal} ({ai_conf:.0%}) | "
+                    f"BUY:{signal_data['score_buy']} "
+                    f"SELL:{signal_data['score_sell']} | "
+                    f"{signal_data['regime']}"
                 )
 
                 if signal_data["signal"] != "HOLD":
-                    self.notifier.send_signal(signal_data)
+                    sent = self.notifier.send_signal(signal_data)
+                    if sent:
+                        logger.info(
+                            f"  ✅ إشارة أُرسلت: {symbol}"
+                        )
 
             except Exception as e:
                 logger.error(f"❌ خطأ {symbol}: {e}")
